@@ -1,0 +1,20 @@
+[33md69643b[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m HEAD@{0}: reset: moving to origin/main
+[33m9f2590f[m HEAD@{1}: commit: clean commit without env
+[33m4479ed5[m HEAD@{2}: reset: moving to HEAD~1
+[33mf0dab43[m HEAD@{3}: commit: jjj
+[33m4479ed5[m HEAD@{4}: commit: k
+[33m5184032[m HEAD@{5}: commit: aa
+[33m9017eec[m HEAD@{6}: commit: orders
+[33mff1f1e2[m HEAD@{7}: commit: seller
+[33m9a6c206[m HEAD@{8}: commit: bot
+[33md69643b[m[33m ([m[1;36mHEAD[m[33m -> [m[1;32mmain[m[33m, [m[1;31morigin/main[m[33m, [m[1;31morigin/HEAD[m[33m)[m HEAD@{9}: commit: chat btn
+[33mbfd823e[m HEAD@{10}: commit: chat modified
+[33mdc79391[m HEAD@{11}: commit: chat 2
+[33m0ab3756[m HEAD@{12}: commit: chat
+[33m82f9dcc[m HEAD@{13}: commit: h
+[33md07ef3f[m HEAD@{14}: commit: site name
+[33m345f032[m HEAD@{15}: commit: cart
+[33mda87cff[m HEAD@{16}: commit: desktop ini delete
+[33m693a45a[m HEAD@{17}: commit: deleting
+[33me41cf54[m HEAD@{18}: commit: new changes
+[33m5efb1a9[m HEAD@{19}: commit (initial): first commit
