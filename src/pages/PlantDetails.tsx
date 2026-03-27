@@ -23,7 +23,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { supabase } from "@/integrations/supabase/client";
 import { useAuth } from "@/contexts/AuthContext";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogTrigger, DialogDescription } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
 import ProfileDropdown from "@/components/ProfileDropdown";
 
@@ -54,10 +54,29 @@ const PlantDetails = () => {
   const images = (() => {
     if (!plant) return [PLACEHOLDER_IMAGE];
     const collected: string[] = [];
-    if (plant.tags && Array.isArray(plant.tags)) collected.push(...plant.tags);
-    if (plant.image_url && typeof plant.image_url === 'string') collected.push(plant.image_url);
-    const filtered = collected.filter((u) => !!u);
-    return filtered.length ? filtered : [PLACEHOLDER_IMAGE];
+    
+    console.log('Plant data:', { images: plant.images, image_url: plant.image_url, image_urls: plant.image_urls });
+    
+    // Collect multiple images from various possible fields
+    if (plant.images && Array.isArray(plant.images) && plant.images.length > 0) {
+      const validImages = plant.images.filter((img: any) => typeof img === 'string' && img.trim());
+      console.log('Valid images from images array:', validImages);
+      collected.push(...validImages);
+    }
+    if (plant.image_urls && Array.isArray(plant.image_urls) && plant.image_urls.length > 0) {
+      const validUrls = plant.image_urls.filter((img: any) => typeof img === 'string' && img.trim());
+      console.log('Valid images from image_urls array:', validUrls);
+      collected.push(...validUrls);
+    }
+    if (plant.image_url && typeof plant.image_url === 'string' && plant.image_url.trim()) {
+      console.log('Single image_url found:', plant.image_url);
+      collected.push(plant.image_url);
+    }
+    
+    // Remove duplicates
+    const unique = Array.from(new Set(collected.filter((u) => !!u)));
+    console.log('Final images array:', unique);
+    return unique.length ? unique : [PLACEHOLDER_IMAGE];
   })();
   const careInstructions = (() => {
     const raw = plant?.care_instructions;
@@ -194,34 +213,46 @@ const PlantDetails = () => {
   const handleSubmitReview = async () => {
     if (!plant || !user) return;
     if (reviewRating < 1) {
-      toast({ title: 'Please select a rating' });
+      toast({ title: 'Error', description: 'Please select a rating' });
       return;
     }
     setSubmittingReview(true);
     try {
-      const { error } = await supabase.from('reviews').insert([{ 
+      const { error: insertError } = await supabase.from('reviews').insert([{ 
         plant_id: plant.id,
         reviewer_id: user.id,
         reviewer_name: user.fullName || null,
         rating: reviewRating,
         comment: reviewText || null,
-        created_at: new Date().toISOString(),
       }]);
-      if (!error) {
-        // refresh reviews list
-        const { data: reviewsData } = await supabase
-          .from('reviews')
-          .select('*')
-          .eq('plant_id', plant.id)
-          .order('created_at', { ascending: false });
-        setReviews(reviewsData || []);
-        setHasReviewed(true);
-        setReviewOpen(false);
-        setReviewRating(0);
-        setReviewText('');
-        toast({ title: 'Thank you for your review!' });
+
+      if (insertError) {
+        toast({ title: 'Error', description: insertError.message || 'Failed to submit review' });
+        setSubmittingReview(false);
+        return;
       }
+
+      // refresh reviews list
+      const { data: reviewsData, error: fetchError } = await supabase
+        .from('reviews')
+        .select('*')
+        .eq('plant_id', plant.id)
+        .order('created_at', { ascending: false });
+
+      if (fetchError) {
+        console.error('Error fetching reviews:', fetchError);
+        toast({ title: 'Error', description: 'Failed to load reviews' });
+      } else {
+        setReviews(reviewsData || []);
+      }
+
+      setHasReviewed(true);
+      setReviewOpen(false);
+      setReviewRating(0);
+      setReviewText('');
+      toast({ title: 'Success!', description: 'Thank you for your review!' });
     } catch (err: any) {
+      console.error('Review submission error:', err);
       toast({ title: 'Error', description: err.message || 'Failed to submit review' });
     } finally {
       setSubmittingReview(false);
@@ -274,18 +305,22 @@ const PlantDetails = () => {
           console.warn('Error fetching seller profile', err);
         }
 
-        const { data: reviewsData, error: reviewsError } = await supabase
-          .from('reviews')
-          .select('*')
-          .eq('plant_id', id)
-          .order('created_at', { ascending: false });
+        try {
+          const { data: reviewsData, error: reviewsError } = await supabase
+            .from('reviews')
+            .select('*')
+            .eq('plant_id', id)
+            .order('created_at', { ascending: false });
 
-        if (reviewsError) {
-          // non-fatal
-          console.warn(reviewsError);
+          if (reviewsError) {
+            console.warn('Reviews fetch error:', reviewsError);
+            setReviews([]);
+          } else {
+            setReviews(reviewsData ?? []);
+          }
+        } catch (reviewsErr) {
+          console.warn('Failed to fetch reviews:', reviewsErr);
           setReviews([]);
-        } else {
-          setReviews(reviewsData ?? []);
         }
 
         // Check if current user has this plant in their wishlist
@@ -570,6 +605,9 @@ const PlantDetails = () => {
                 <DialogContent className="sm:max-w-md">
                   <DialogHeader>
                     <DialogTitle>Review {plant?.name}</DialogTitle>
+                    <DialogDescription>
+                      Share your honest experience with this plant
+                    </DialogDescription>
                   </DialogHeader>
                   <div className="space-y-4 pt-2">
                     {/* Star selector */}

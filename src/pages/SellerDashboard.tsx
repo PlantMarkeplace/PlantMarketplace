@@ -269,11 +269,16 @@ const ALGERIAN_CITIES = [
     try {
       const { data, error } = await supabase
         .from('messages')
-        .select('id, sender_id, receiver_id, message, created_at, is_read, topic')
+        .select('id, sender_id, receiver_id, message, created_at, is_read, plant_id')
         .or(`sender_id.eq.${authUser.id},receiver_id.eq.${authUser.id}`)
         .order('created_at', { ascending: false });
 
-      if (error) throw error;
+      if (error) {
+        console.error('Messages fetch error:', error);
+        throw error;
+      }
+
+      console.log('Messages fetched for seller:', data);
 
       const conversationMap = new Map<string, any>();
       
@@ -287,7 +292,7 @@ const ALGERIAN_CITIES = [
             lastMessageTime: msg.created_at,
             sender: msg.sender_id,
             otherUserName: '',
-            plantName: msg.topic || '',
+            plantId: msg.plant_id,
             unreadCount: 0,
           });
         }
@@ -309,12 +314,14 @@ const ALGERIAN_CITIES = [
             .select('full_name')
             .eq('user_id', conv.otherUserId)
             .single();
-          conv.otherUserName = profile?.full_name || 'Customer';
+          conv.otherUserName = profile?.full_name || 'Buyer';
         } catch (err) {
-          conv.otherUserName = 'Customer';
+          console.warn('Error fetching profile for conversation:', err);
+          conv.otherUserName = 'Buyer';
         }
       }
 
+      console.log('Conversations grouped for seller:', conversationsWithNames);
       setConversations(conversationsWithNames);
     } catch (err: any) {
       console.error('Error fetching conversations:', err);
@@ -520,6 +527,7 @@ useEffect(() => {
       difficulty: newPlant.difficulty || "Easy",
       location: newPlant.location,
       image_url: imageUrl,
+      images: imageUrls.length > 0 ? imageUrls : [],
       stock_quantity: Number(newPlant.stock || 0),
       in_stock: Number(newPlant.stock || 0) > 0,
       scientific_name: "",

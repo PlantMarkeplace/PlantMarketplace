@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import Navbar from "@/components/landing/Navbar";
 import { useAuth } from "@/contexts/AuthContext";
 import { supabase } from "@/integrations/supabase/client";
+import { useToast } from "@/hooks/use-toast";
 
 import {
   Leaf,
@@ -31,6 +32,7 @@ const BuyerDashboard = () => {
   const { user, isAuthenticated, isLoading, logout } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
+  const { toast } = useToast();
   const [activeTab, setActiveTab] = useState("overview");
   const [favoriteProducts, setFavoriteProducts] = useState([]);
   const [recentOrders, setRecentOrders] = useState([]);
@@ -40,6 +42,63 @@ const BuyerDashboard = () => {
   const [reviewsCount, setReviewsCount] = useState(0);
   const [conversations, setConversations] = useState<any[]>([]);
   const [profileData, setProfileData] = useState<any>(null);
+  const [reviews, setReviews] = useState<any[]>([]);
+  const [submittingReview, setSubmittingReview] = useState(false);
+  const [reviewForm, setReviewForm] = useState({ rating: 5, comment: '' });
+  const [selectedOrderForReview, setSelectedOrderForReview] = useState<string | null>(null);
+
+  const fetchReviews = async () => {
+    try {
+      const { data, error } = await supabase
+        .from('reviews')
+        .select('*')
+        .eq('reviewer_id', user?.id)
+        .order('created_at', { ascending: false });
+
+      if (error) throw error;
+      if (data) setReviews(data);
+    } catch (err: any) {
+      console.error('Error fetching reviews:', err);
+    }
+  };
+
+  const handleSubmitReview = async (orderId: string, plantId: string, sellerId: string) => {
+    if (!user || !reviewForm.comment.trim()) {
+      alert('Please add a comment');
+      return;
+    }
+
+    setSubmittingReview(true);
+    try {
+      const { error } = await supabase
+        .from('reviews')
+        .insert([
+          {
+            reviewer_id: user.id,
+            seller_id: sellerId,
+            plant_id: plantId,
+            order_id: orderId,
+            rating: reviewForm.rating,
+            comment: reviewForm.comment.trim(),
+          }
+        ]);
+
+      if (error) throw error;
+
+      // Show success message
+      alert('Review submitted successfully!');
+      
+      // Reset form and refresh reviews
+      setReviewForm({ rating: 5, comment: '' });
+      setSelectedOrderForReview(null);
+      await fetchReviews();
+    } catch (error: any) {
+      console.error('Error submitting review:', error);
+      alert(`Failed to submit review: ${error.message}`);
+    } finally {
+      setSubmittingReview(false);
+    }
+  };
 
   const fetchOrders = async () => {
     try {
@@ -154,16 +213,24 @@ const BuyerDashboard = () => {
         // Fetch all messages where user is sender or receiver
         const { data, error } = await supabase
           .from('messages')
-          .select('id, sender_id, receiver_id, message, created_at, is_read, topic')
+          .select('id, sender_id, receiver_id, message, created_at, is_read, plant_id')
           .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
           .order('created_at', { ascending: false });
-        if (error) throw error;
+        
+        if (error) {
+          console.error('Messages fetch error:', error);
+          throw error;
+        }
+
+        console.log('Messages fetched:', data);
 
         // Group messages by conversation (with each unique seller/buyer)
         const conversationMap = new Map<string, any>();
         
         (data || []).forEach((msg: any) => {
           const otherUserId = msg.sender_id === user.id ? msg.receiver_id : msg.sender_id;
+          
+          // Only add if not already exists (keeps the most recent message)
           if (!conversationMap.has(otherUserId)) {
             conversationMap.set(otherUserId, {
               id: msg.id,
@@ -171,7 +238,7 @@ const BuyerDashboard = () => {
               lastMessage: msg.message,
               lastMessageTime: msg.created_at,
               sender: msg.sender_id,
-              plantName: msg.topic || '',
+              plantId: msg.plant_id,
               unreadCount: 0,
             });
           }
@@ -195,15 +262,18 @@ const BuyerDashboard = () => {
               .select('full_name')
               .eq('user_id', conv.otherUserId)
               .single();
-            conv.otherUserName = profile?.full_name || 'Seller';
+            conv.otherUserName = profile?.full_name || 'User';
           } catch (err) {
-            conv.otherUserName = 'Seller';
+            console.warn('Error fetching profile for conversation:', err);
+            conv.otherUserName = 'User';
           }
         }
 
+        console.log('Conversations grouped:', conversationsWithNames);
         setConversations(conversationsWithNames);
       } catch (err: any) {
         console.error('Error fetching conversations:', err);
+        toast({ title: 'Error', description: 'Failed to load conversations', variant: 'destructive' });
       }
     };
 
@@ -229,6 +299,7 @@ const BuyerDashboard = () => {
     fetchStats();
     fetchConversations();
     fetchProfileData();
+    fetchReviews();
 
     // Set up real-time subscription for order updates
     const ordersSubscription = supabase
