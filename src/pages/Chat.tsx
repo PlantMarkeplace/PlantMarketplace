@@ -81,11 +81,18 @@ const Chat = () => {
     const markMessagesAsRead = async () => {
       if (!user?.id) return;
       try {
-        await supabase
+        console.log('Marking messages as read for:', { userId: user.id, sellerId: sellerId });
+        const { error } = await supabase
           .from('messages')
           .update({ is_read: true })
           .eq('receiver_id', user.id)
           .eq('sender_id', sellerId);
+        
+        if (error) {
+          console.error('Error marking messages as read:', error);
+        } else {
+          console.log('✅ Messages marked as read successfully!');
+        }
       } catch (err) {
         console.error('Error marking messages as read:', err);
       }
@@ -180,6 +187,7 @@ const Chat = () => {
         sender_id: user.id,
         receiver_id: sellerId,
         message: input.trim(),
+        plant_id: plantId || null,
       };
 
       console.log('Message data to insert:', messageData);

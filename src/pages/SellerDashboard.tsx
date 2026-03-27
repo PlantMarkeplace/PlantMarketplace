@@ -269,7 +269,7 @@ const ALGERIAN_CITIES = [
     try {
       const { data, error } = await supabase
         .from('messages')
-        .select('id, sender_id, receiver_id, message, created_at, is_read, plant_id')
+        .select('id, sender_id, receiver_id, message, created_at, is_read')
         .or(`sender_id.eq.${authUser.id},receiver_id.eq.${authUser.id}`)
         .order('created_at', { ascending: false });
 
@@ -292,16 +292,27 @@ const ALGERIAN_CITIES = [
             lastMessageTime: msg.created_at,
             sender: msg.sender_id,
             otherUserName: '',
-            plantId: msg.plant_id,
+            plantId: null,
             unreadCount: 0,
           });
         }
       });
 
+      // Count ONLY unread messages from other users to this seller
       (data || []).forEach((msg: any) => {
-        const otherUserId = msg.sender_id === authUser.id ? msg.receiver_id : msg.sender_id;
+        // Skip if message is already read
+        if (msg.is_read === true) return;
+        
+        // Skip if current user is the sender (we only count received messages)
+        if (msg.sender_id === authUser.id) return;
+        
+        // Skip if current user is NOT the receiver (shouldn't happen but be safe)
+        if (msg.receiver_id !== authUser.id) return;
+        
+        // Now count this unread received message
+        const otherUserId = msg.sender_id;
         const conv = conversationMap.get(otherUserId);
-        if (conv && msg.receiver_id === authUser.id && msg.is_read === false) {
+        if (conv) {
           conv.unreadCount = (conv.unreadCount || 0) + 1;
         }
       });
@@ -321,7 +332,6 @@ const ALGERIAN_CITIES = [
         }
       }
 
-      console.log('Conversations grouped for seller:', conversationsWithNames);
       setConversations(conversationsWithNames);
     } catch (err: any) {
       console.error('Error fetching conversations:', err);
@@ -397,6 +407,101 @@ useEffect(() => {
     supabase.removeChannel(paymentsSubscription);
   };
 }, [user]);
+
+// Separate useEffect for message subscriptions
+useEffect(() => {
+  if (!user?.id) return;
+
+  const authUser = user as any;
+
+  // Set up real-time subscription for message updates (mark as read)
+  const messagesSubscription = supabase
+    .channel(`seller-messages-${authUser.id}`)
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'messages',
+      },
+      async (payload) => {
+        console.log('Message updated (read status):', payload);
+        // Refetch conversations only when messages are marked as read
+        try {
+          const { data, error } = await supabase
+            .from('messages')
+            .select('id, sender_id, receiver_id, message, created_at, is_read')
+            .or(`sender_id.eq.${authUser.id},receiver_id.eq.${authUser.id}`)
+            .order('created_at', { ascending: false });
+
+          if (error) throw error;
+
+          const conversationMap = new Map<string, any>();
+          
+          (data || []).forEach((msg: any) => {
+            const otherUserId = msg.sender_id === authUser.id ? msg.receiver_id : msg.sender_id;
+            if (!conversationMap.has(otherUserId)) {
+              conversationMap.set(otherUserId, {
+                id: msg.id,
+                otherUserId,
+                lastMessage: msg.message,
+                lastMessageTime: msg.created_at,
+                sender: msg.sender_id,
+                otherUserName: '',
+                plantId: null,
+                unreadCount: 0,
+              });
+            }
+          });
+
+          // Count ONLY unread messages from other users to this seller
+          (data || []).forEach((msg: any) => {
+            // Skip if message is already read
+            if (msg.is_read === true) return;
+            
+            // Skip if current user is the sender (we only count received messages)
+            if (msg.sender_id === authUser.id) return;
+            
+            // Skip if current user is NOT the receiver
+            if (msg.receiver_id !== authUser.id) return;
+            
+            // Now count this unread received message
+            const otherUserId = msg.sender_id;
+            const conv = conversationMap.get(otherUserId);
+            if (conv) {
+              conv.unreadCount = (conv.unreadCount || 0) + 1;
+            }
+          });
+
+          const conversationsWithNames = Array.from(conversationMap.values());
+          for (const conv of conversationsWithNames) {
+            try {
+              const { data: profile } = await supabase
+                .from('profiles')
+                .select('full_name')
+                .eq('user_id', conv.otherUserId)
+                .single();
+              conv.otherUserName = profile?.full_name || 'Buyer';
+            } catch (err) {
+              console.warn('Error fetching profile for conversation:', err);
+              conv.otherUserName = 'Buyer';
+            }
+          }
+
+          console.log('Conversations updated from message subscription:', conversationsWithNames);
+          setConversations(conversationsWithNames);
+        } catch (err: any) {
+          console.error('Error in message subscription refetch:', err);
+        }
+      }
+    )
+    .subscribe();
+
+  // Cleanup subscriptions on unmount
+  return () => {
+    supabase.removeChannel(messagesSubscription);
+  };
+}, [user?.id]);
 
   const [activeTab, setActiveTab] = useState("overview");
   const [isAddPlantOpen, setIsAddPlantOpen] = useState(false);

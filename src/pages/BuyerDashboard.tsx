@@ -213,7 +213,7 @@ const BuyerDashboard = () => {
         // Fetch all messages where user is sender or receiver
         const { data, error } = await supabase
           .from('messages')
-          .select('id, sender_id, receiver_id, message, created_at, is_read, plant_id')
+          .select('id, sender_id, receiver_id, message, created_at, is_read')
           .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
           .order('created_at', { ascending: false });
         
@@ -238,17 +238,30 @@ const BuyerDashboard = () => {
               lastMessage: msg.message,
               lastMessageTime: msg.created_at,
               sender: msg.sender_id,
-              plantId: msg.plant_id,
+              plantId: null,
               unreadCount: 0,
             });
           }
         });
 
+        console.log('Messages fetched:', data);
+
         // Count unread messages for each conversation
+        // Count ONLY unread messages from other users (sellers) to this buyer
         (data || []).forEach((msg: any) => {
-          const otherUserId = msg.sender_id === user.id ? msg.receiver_id : msg.sender_id;
+          // Skip if message is already read
+          if (msg.is_read === true) return;
+          
+          // Skip if current user is the sender (we only count received messages)
+          if (msg.sender_id === user.id) return;
+          
+          // Skip if current user is NOT the receiver (shouldn't happen but be safe)
+          if (msg.receiver_id !== user.id) return;
+          
+          // Now count this unread received message
+          const otherUserId = msg.sender_id;
           const conv = conversationMap.get(otherUserId);
-          if (conv && msg.receiver_id === user.id && msg.is_read === false) {
+          if (conv) {
             conv.unreadCount = (conv.unreadCount || 0) + 1;
           }
         });
@@ -269,7 +282,6 @@ const BuyerDashboard = () => {
           }
         }
 
-        console.log('Conversations grouped:', conversationsWithNames);
         setConversations(conversationsWithNames);
       } catch (err: any) {
         console.error('Error fetching conversations:', err);
@@ -300,8 +312,110 @@ const BuyerDashboard = () => {
     fetchConversations();
     fetchProfileData();
     fetchReviews();
+  }, [isAuthenticated, isLoading, user, navigate]);
 
-    // Set up real-time subscription for order updates
+  // Separate useEffect for subscriptions to messages
+  useEffect(() => {
+    if (!user?.id) return;
+
+    // Set up real-time subscription for message updates (mark as read)
+    const messagesSubscription = supabase
+      .channel(`buyer-messages-${user.id}`)
+      .on(
+        'postgres_changes',
+        {
+          event: 'UPDATE',
+          schema: 'public',
+          table: 'messages',
+        },
+        (payload) => {
+          console.log('Message updated (read status):', payload);
+          // Refetch conversations to update unread count
+          const refetchConversations = async () => {
+            try {
+              const { data, error } = await supabase
+                .from('messages')
+                .select('id, sender_id, receiver_id, message, created_at, is_read')
+                .or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`)
+                .order('created_at', { ascending: false });
+              
+              if (error) throw error;
+
+              const conversationMap = new Map<string, any>();
+              
+              (data || []).forEach((msg: any) => {
+                const otherUserId = msg.sender_id === user.id ? msg.receiver_id : msg.sender_id;
+                
+                if (!conversationMap.has(otherUserId)) {
+                  conversationMap.set(otherUserId, {
+                    id: msg.id,
+                    otherUserId,
+                    lastMessage: msg.message,
+                    lastMessageTime: msg.created_at,
+                    sender: msg.sender_id,
+                    plantId: null,
+                    unreadCount: 0,
+                  });
+                }
+              });
+
+              // Count unread messages ONLY from the other user
+              // Count ONLY unread messages from other users (sellers) to this buyer
+              (data || []).forEach((msg: any) => {
+                // Skip if message is already read
+                if (msg.is_read === true) return;
+                
+                // Skip if current user is the sender (we only count received messages)
+                if (msg.sender_id === user.id) return;
+                
+                // Skip if current user is NOT the receiver
+                if (msg.receiver_id !== user.id) return;
+                
+                // Now count this unread received message
+                const otherUserId = msg.sender_id;
+                const conv = conversationMap.get(otherUserId);
+                if (conv) {
+                  conv.unreadCount = (conv.unreadCount || 0) + 1;
+                }
+              });
+
+              const conversationsWithNames = Array.from(conversationMap.values());
+              for (const conv of conversationsWithNames) {
+                try {
+                  const { data: profile } = await supabase
+                    .from('profiles')
+                    .select('full_name')
+                    .eq('user_id', conv.otherUserId)
+                    .single();
+                  conv.otherUserName = profile?.full_name || 'User';
+                } catch (err) {
+                  console.warn('Error fetching profile for conversation:', err);
+                  conv.otherUserName = 'User';
+                }
+              }
+
+              console.log('Conversations updated from subscription:', conversationsWithNames);
+              setConversations(conversationsWithNames);
+            } catch (err: any) {
+              console.error('Error in subscription refetch:', err);
+            }
+          };
+          
+          refetchConversations();
+        }
+      )
+      .subscribe();
+
+    // Cleanup subscription on unmount
+    return () => {
+      supabase.removeChannel(messagesSubscription);
+    };
+  }, [user?.id]);
+
+  // Set up order subscription
+  useEffect(() => {
+    if (!user?.id) return;
+
     const ordersSubscription = supabase
       .channel('buyer-orders')
       .on(
@@ -314,16 +428,31 @@ const BuyerDashboard = () => {
         },
         (payload) => {
           console.log('Order updated:', payload);
-          fetchOrders(); // Refresh orders when an order is updated
+          // Refetch orders when updated
+          const refetchOrders = async () => {
+            try {
+              const { data: orders, error } = await supabase
+                .from('orders')
+                .select('*')
+                .eq('buyer_id', user.id)
+                .order('created_at', { ascending: false });
+
+              if (error) throw error;
+              setRecentOrders(orders || []);
+              setOrdersCount(orders?.length || 0);
+            } catch (err) {
+              console.error('Error refetching orders from subscription:', err);
+            }
+          };
+          refetchOrders();
         }
       )
       .subscribe();
 
-    // Cleanup subscription on unmount
     return () => {
       supabase.removeChannel(ordersSubscription);
     };
-  }, [isAuthenticated, isLoading, user, navigate]);
+  }, [user?.id]);
 
   const tabs = [
     { id: "overview", label: "Overview", icon: TrendingUp },
